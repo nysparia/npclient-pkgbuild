@@ -154,6 +154,38 @@ write_pkgbuild() {
     fi
     sed -i -E "s/^sha256sums_x86_64=.*/sha256sums_x86_64=('${sha_x}')/" PKGBUILD
     sed -i -E "s/^sha256sums_aarch64=.*/sha256sums_aarch64=('${sha_a}')/" PKGBUILD
+
+    # sed 匹配不到时仍然退出 0（GNU sed 手册 2.3：只有非法脚本、打不开输入、
+    # I/O 错误才返回非零），所以「改没改中」必须自己回读确认。
+    # 不回读的后果是静默的：pkgver 更新了而 sha256sums 还是旧的。
+    # 后面的 makepkg --printsrcinfo 只检查 PKGBUILD 能否解析，不做
+    # --verifysource 那样的完整性检查，所以这道闸门兜不住旧哈希；
+    # 脚本会照常打印“已更新”，把旧的 sha256 写进 .SRCINFO。
+    #
+    # 失败时 return 1 而不是 die：die 会直接退出，main() 就没机会恢复备份。
+    local item key want got
+    for item in "pkgver=$pkgver" "pkgrel=$pkgrel" \
+                "sha256sums_x86_64=('$sha_x')" "sha256sums_aarch64=('$sha_a')"; do
+        key=${item%%=*}
+        want=${item#*=}
+        got=$(sed -n "s/^${key}=//p" PKGBUILD | head -n1)
+        if [[ $got != "$want" ]]; then
+            warn "PKGBUILD 回读校验失败：${key} 期望 ${want}，实际 ${got:-<缺失>}"
+            return 1
+        fi
+    done
+    if [[ -n $epoch ]]; then
+        got=$(sed -n 's/^epoch=//p' PKGBUILD | head -n1)
+        if [[ $got != "$epoch" ]]; then
+            warn "PKGBUILD 回读校验失败：epoch 期望 ${epoch}，实际 ${got:-<缺失>}"
+            return 1
+        fi
+    fi
+    got=$(sed -n 's/^_debver=//p' PKGBUILD | head -n1 | tr -d "\"'")
+    if [[ $got != "$debver" ]]; then
+        warn "PKGBUILD 回读校验失败：_debver 期望 ${debver}，实际 ${got:-<缺失>}"
+        return 1
+    fi
 }
 
 main() {
@@ -439,7 +471,12 @@ main() {
 
     local backup="$WORKDIR/PKGBUILD.bak" srcinfo_tmp=".SRCINFO.tmp.$$"
     cp PKGBUILD "$backup"
-    write_pkgbuild "$pkgver" "$new_rel" "$epoch" "$debver" "$sha_x" "$sha_a"
+    # 必须在 if 里调用：write_pkgbuild 回读失败返回 1，直接调用时 set -e 会
+    # 立刻退出，下面的回滚就成了死代码。
+    if ! write_pkgbuild "$pkgver" "$new_rel" "$epoch" "$debver" "$sha_x" "$sha_a"; then
+        cp "$backup" PKGBUILD
+        die "PKGBUILD 回读校验失败，已回滚（.SRCINFO 未改动）"
+    fi
     if ! makepkg --printsrcinfo > "$srcinfo_tmp"; then
         rm -f "$srcinfo_tmp"
         cp "$backup" PKGBUILD
