@@ -122,7 +122,6 @@ deb 的 `control` 里 `Homepage: https://netpad.pro`、`Maintainer: NPclient <su
 ### 自动：update.sh（推荐）
 
 ```bash
-cd npclient-source
 ./update.sh --check     # 只预览：打印 deb Version 与 pkgver/pkgrel 计划
 ./update.sh             # 写 PKGBUILD 与 .SRCINFO
 ./update.sh --build     # 需要的话顺手 makepkg -fc
@@ -173,8 +172,6 @@ PKGBUILD 与 `.SRCINFO` 都不会被破坏。`pkgrel` 支持 Arch 的整数和�
 ### 手工流程（等价做法）
 
 ```bash
-cd npclient-source
-
 # 1. 看有没有新版（不需要 root，也会打印更新说明）
 npctl update --check
 

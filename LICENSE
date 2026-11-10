@@ -1,0 +1,48 @@
+MIT License
+
+Copyright (c) 2026 nysparia
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
+
+===============================================================================
+NOT COVERED BY THE MIT LICENSE ABOVE / 上述 MIT 许可不覆盖的内容
+===============================================================================
+
+1. NPclient / npd / npctl  ——  PROPRIETARY, NOT OURS
+   NPclient is proprietary software owned by NetPad (https://netpad.pro).
+   It is closed-source, ships no license text, and is NOT redistributed in
+   this repository. The PKGBUILD only downloads the vendor's official .deb
+   at build time; all rights remain with NetPad. Packaging it here does not
+   grant anyone a license to the software itself.
+
+   NPclient 是 NetPad（https://netpad.pro）的专有闭源软件，deb 内不含任何
+   许可正文。本仓库**不重新分发**该软件，PKGBUILD 仅在构建时从厂商官方地址
+   下载；打包行为不构成对该软件本身的任何授权。
+
+2. npclient-source/linux-install.sh
+   NetPad's upstream Ubuntu installer, archived verbatim for reference.
+   Copyright belongs to NetPad. Not covered by the MIT license above.
+
+3. debtap-src/debtap-3.6.3/
+   Third-party software under the GNU General Public License v3.
+   See debtap-src/debtap-3.6.3/LICENSE. Vendored unmodified.
+
+4. debdemo/hello_2.10-3_amd64.deb
+   GNU hello, Copyright (c) the Free Software Foundation, GPLv3+.
+   Included as a test fixture.

@@ -1,0 +1,16 @@
+# 构建产物（makepkg 的 src/、pkg/ 与生成的包）
+*.pkg.tar.zst
+*.pkg.tar.xz
+*.deb
+src/
+pkg/
+
+# 上游参考压缩包
+*.tgz
+
+# 临时目录 / 下载缓存
+.test-*/
+.npchk*
+
+# 历史重写前的备份（仅本地，勿入库）
+.backup-before-rewrite.bundle
