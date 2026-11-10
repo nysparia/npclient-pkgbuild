@@ -60,7 +60,7 @@ post_upgrade() {
     '  sudo npctl start --persist' \
     '' \
     '上游 systemd 单元或配置模板可能已变更，请检查：' \
-    '  pacman -Qii npclient-bin | grep -A5 backup' \
+    '  pacman -Qii npclient | grep -A5 backup' \
     '若提示 npd.toml.pacnew，请合并后再重启服务。'
 }
 

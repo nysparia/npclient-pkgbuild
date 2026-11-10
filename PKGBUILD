@@ -1,24 +1,26 @@
 # Maintainer: Your Name <you at example dot com>
 
-pkgname=npclient-bin
+pkgname=npclient
 _pkgname=npd
 pkgver=0.1.12
-pkgrel=2
+pkgrel=3
 # 上一次构建所用 deb 的完整 Version 字段（含 epoch / Debian 修订号）。
 # update.sh 靠它判断“上游发版”还是“仅 Debian 重新打包”。
-_debver=0.1.12
-pkgdesc="NPclient TUN proxy daemon and command line client (prebuilt binaries)"
+_debver='0.1.12'
+_debfile="${_debver//:/_}-${pkgrel}"
+pkgdesc="TUN proxy daemon and command line client (prebuilt binaries)"
 arch=('x86_64' 'aarch64')
 url="https://netpad.pro"
-license=('custom:LicenseRef-NPclient-Proprietary')
+license=('LicenseRef-NPclient-Proprietary')
 depends=('glibc' 'gcc-libs' 'systemd' 'iproute2' 'iana-etc' 'polkit')
 optdepends=(
     'systemd-resolvconf: DNS takeover via resolvectl'
     'networkmanager: keep NetworkManager from managing np-tun0'
 )
-provides=("npclient=${pkgver}" "npd=${pkgver}")
-conflicts=('npclient' 'npd')
-options=('!strip')  # upstream binaries ship pre-stripped; never let makepkg touch them
+provides=("npd=${pkgver}")
+conflicts=('npd' 'npclient-bin')
+replaces=('npclient-bin')
+options=('!strip' '!debug')  # upstream binaries ship pre-stripped; don't re-strip or build -debug
 install="${pkgname}.install"
 backup=('etc/npclient/npd.toml')
 
@@ -27,9 +29,11 @@ backup=('etc/npclient/npd.toml')
 # with and without it the payload is byte-identical). Only 0.1.2 has a pinned
 # URL (npd_0.1.2_amd64.deb). Consequence: every upstream release makes the
 # checksum below stale and this PKGBUILD must be bumped in lockstep.
+# 本地文件名与 ?v= 同时带 deb 版本和 pkgrel：只要包内容或打包修订变化，
+# 缓存键就会变，makepkg 不会复用同名旧 deb（revision 变化、同版本重打包都覆盖）。
 _base="https://assets.netpad.pro/download/Linux"
-source_x86_64=("${pkgname}-${pkgver}-x86_64.deb::${_base}/npd_latest_amd64.deb?v=${pkgver}")
-source_aarch64=("${pkgname}-${pkgver}-aarch64.deb::${_base}/npd_latest_arm64.deb?v=${pkgver}")
+source_x86_64=("${pkgname}-${_debfile}-x86_64.deb::${_base}/npd_latest_amd64.deb?v=${_debfile}")
+source_aarch64=("${pkgname}-${_debfile}-aarch64.deb::${_base}/npd_latest_arm64.deb?v=${_debfile}")
 sha256sums_x86_64=('1ac7863421cb88e6de486629ea2b0527333f7966b9f0fba4146bbf7e80a4746e')
 sha256sums_aarch64=('2e78c21ec7f3aa3d4b6f6252d32d21141ac734aca04def4ad2e4ccd18fdea2e8')
 
@@ -42,7 +46,10 @@ package() {
   if [[ -d "${pkgdir}/lib/systemd/system" ]]; then
     install -d "${pkgdir}/usr/lib/systemd/system"
     mv "${pkgdir}/lib/systemd/system/"* "${pkgdir}/usr/lib/systemd/system/"
-    rm -rf "${pkgdir}/lib"
+    # 只删掉 /lib/systemd；若 /lib 下还有别的内容，保留并让文件列表暴露出来，
+    # 而不是一把 rm -rf /lib 把上游文件悄悄删掉。
+    rm -rf "${pkgdir}/lib/systemd"
+    rmdir "${pkgdir}/lib" 2>/dev/null || true
   fi
 
   # Upstream postinst does `useradd -r -M -d /var/lib/npd -s /usr/sbin/nologin -G npclient npd`.

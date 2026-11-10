@@ -1,4 +1,4 @@
-# npclient-bin
+# npclient
 
 Manjaro/Arch 打包工作区，把 NetPad 的 NPclient 官方 Ubuntu `.deb` 转成 pacman 包。
 
@@ -7,11 +7,11 @@ Manjaro/Arch 打包工作区，把 NetPad 的 NPclient 官方 Ubuntu `.deb` 转�
 | 文件 | 说明 |
 |---|---|
 | `PKGBUILD` | 构建脚本（deb → Arch 包） |
-| `npclient-bin.install` | pacman 钩子脚本（安装/升级/卸载提示） |
+| `npclient.install` | pacman 钩子脚本（安装/升级/卸载提示） |
 | `update.sh` | 从上游 deb 的 control 同步 `pkgver`/`pkgrel`/`epoch`/两个架构的 sha256 |
 | `.SRCINFO` | AUR 需要，`makepkg --printsrcinfo > .SRCINFO` 生成 |
 | `linux-install.sh` | 上游 Ubuntu 安装脚本，仅作参考，**不要运行** |
-| `npclient-bin-0.1.12-2-x86_64.pkg.tar.zst` | 已构建好的包 |
+| `npclient-0.1.12-3-x86_64.pkg.tar.zst` | 已构建好的包 |
 
 ## 构建与安装
 
@@ -44,13 +44,18 @@ sudo npctl boot on                       # 5. 开机自动恢复隧道（强烈�
 
 | 项 | 上游 deb | 本包 | 原因 |
 |---|---|---|---|
+| 包名 | `npd` | `npclient` | 非自由软件且不提供源码，按 Nonfree guidelines 不加 `-bin`；用 `replaces`/`conflicts` 迁移旧名 `npclient-bin` |
+| 预编译二进制 | 无 | `options=('!strip' '!debug')` | 上游已 strip，避免重复处理并跳过空 `-debug` 包 |
 | 用户/组创建 | `postinst` 里 `useradd`/`groupadd` | `usr/lib/sysusers.d/npd.conf` | Arch 由 `20-systemd-sysusers.hook` 自动应用，声明式、可重复 |
 | 自动启动 | `systemctl enable --now npd` | **不自动启用** | Arch 惯例：启停由用户决定 |
 | polkit 规则 | 含 `manage-unit-files`（无单元过滤） | **移除该条**，只留 `resolve1` | 见下 |
 | 自动加组 | `postinst` 扫描会话用户并入组 | 不自动，打印指引 | 避免脚本猜错用户 |
-| SBOM / 许可证 | `/usr/share/doc/npd/*.json` | `/usr/share/licenses/npclient-bin/` | Arch 路径规范；已验证运行时**不读取**这些文件 |
+| SBOM / 许可证 | `/usr/share/doc/npd/*.json` | `/usr/share/licenses/npclient/` | Arch 路径规范；已验证运行时**不读取**这些文件 |
 | 打包 | `dpkg -i` | `makepkg`（`.PKGINFO`/`.BUILDINFO`/`.MTREE` 齐全） | 合规 |
 | 校验 | 脚本内 sha256 + `dpkg-deb -f` | `sha256sums_x86_64` | 同级别，但在构建期 |
+
+> 早期包名是 `npclient-bin`；非自由软件、没有源码时不应使用 `-bin` 后缀，
+> 因此改为 `npclient`，并用 `replaces`/`conflicts` 处理旧名迁移。
 
 ## 安全处理：移除了一条 polkit 规则
 
@@ -77,7 +82,7 @@ polkit.addRule(function(action, subject) {
 
 1. **没有版本恒定 URL**。上游只提供 `npd_latest_amd64.deb`（移动目标），`?v=` 只是 CDN 缓存键——我验证过带与不带 `?v=` 载荷字节完全一致。历史版本中仅 `0.1.2` 有固定地址 `npd_0.1.2_amd64.deb`。
    → 后果：**上游一发版，`sha256sums` 立刻失效**，PKGBUILD 必须同步更新。这也是为什么它不该进 AUR 后放着不管。
-2. **许可证不明**。deb 里没有 LICENSE/EULA 文件，`control` 也没有 `License:` 字段，只有第三方组件的 SBOM。所以用 `LicenseRef-NPclient-Proprietary`，AUR 上需要自行确认再提交。
+2. **许可证不明**。deb 里没有 LICENSE/EULA 文件，`control` 也没有 `License:` 字段，只有第三方组件的 SBOM。所以用 `LicenseRef-NPclient-Proprietary`；包内 `/usr/share/licenses/npclient/` 只有 SBOM 和 GeoIP 声明，没有上游许可正文，AUR 提交前需要向上游确认并补齐。
 3. **DNS 接管依赖 systemd-resolved**。上游 `Recommends: systemd-resolved`。Arch 上 `resolvectl` 由 `systemd` 提供，但 `systemd-resolved.service` 需启用；`systemd-resolvconf` 只在需要接管 `/etc/resolv.conf` 时才是必需——因此列为 `optdepends` 而非 `depends`。
 4. **依赖是从 ELF 反推的**，不是抄 deb 的 `Depends:`：
    - `glibc` / `gcc-libs`：`NEEDED` 只有 `libc.so.6` 和 `libgcc_s.so.1`，最高符号版本 `GLIBC_2.34`（deb 声明 `>= 2.35`，实际要求更低）
@@ -85,6 +90,8 @@ polkit.addRule(function(action, subject) {
    - `polkit`：polkit 规则文件生效所需
    - `iana-etc`：`getaddrinfo` 走服务名解析时需要 `/etc/services`
    - 未依赖 `iptables`/`nft` 可执行文件：只引用 netlink 常量，不 spawn 外部命令
+5. **AUR 提交前的仓库元数据**：`# Maintainer:` 仍是占位名；仓库也还没有 AUR 要求的
+   `LICENSE`/`REUSE.toml`（打包脚本本身可用 0BSD）。这两项不影响本地构建。
 
 ## 升级流程
 
@@ -98,22 +105,24 @@ cd npclient-source
 ./update.sh --check     # 只预览：打印 deb Version 与 pkgver/pkgrel 计划
 ./update.sh             # 写 PKGBUILD 与 .SRCINFO
 ./update.sh --build     # 需要的话顺手 makepkg -fc
-sudo pacman -U npclient-bin-<新版本>-<pkgrel>-x86_64.pkg.tar.zst
+sudo pacman -U npclient-<新版本>-<pkgrel>-x86_64.pkg.tar.zst
 ```
 
 两个安全约束：
 
-- **`--accept-epoch` 闸门**：新版本没有超过已发布版本、需要本地 epoch 自增时，
+- **`--accept-epoch` 闸门**：需要本地 epoch 自增、或要采纳工作区里更高的 epoch 时，
   默认只打印计划并退出，不写文件；确认无误后加 `--accept-epoch` 重跑。
-- **以 git tag 为版本基准**：比较的是最近一个 `v*` tag 里的 PKGBUILD（用户真正
-  装过的那版），而不是可能被手工改过的工作区；没有 tag 时才退回工作区并告警。
+- **以 git tag 为版本基准，但不允许低于工作区**：比较的是 HEAD 可达、版本最高的
+  `v*` tag 里的 PKGBUILD（用户真正装过的那版），而不是可能被手工改过的工作区；没有
+  tag 时才退回工作区并告警。如果工作区版本已经领先 tag（改了但还没打 tag），候选版本必须超过
+  工作区：同 `pkgver` 时自动提升 `pkgrel`，工作区 `pkgver` 更高时直接拒绝写入。
 
 所以每次发布、验证通过后要打 tag（tag 名不能带 `:`，epoch 从 tag 内的
 PKGBUILD 读取）：
 
 ```bash
 git add -A
-git commit -m "npclient-bin <pkgver>-<pkgrel>"
+git commit -m "npclient <pkgver>-<pkgrel>"
 git tag "v<pkgver>-<pkgrel>"
 ```
 
@@ -131,9 +140,12 @@ git tag "v<pkgver>-<pkgrel>"
 脚本把本地 epoch +1、`pkgrel` 归 1。这是不可逆操作，建议先 `./update.sh --check` 确认。
 
 其他保证：两个架构的 deb 都下载并核对 `Package`/`Architecture`/`Version` 一致；
-两个 `sha256sums_*` 直接用本地下载的 deb 计算（不依赖 `updpkgsums`，它属于
-`pacman-contrib`，本机没装也能跑）；写完自动
-`makepkg --printsrcinfo > .SRCINFO`，失败则回滚 PKGBUILD。
+两个 `sha256sums_*` 直接用本地下载的 deb 计算（不依赖 `updpkgsums`）；下载带时间戳
+查询参数，避免 CDN 缓存导致误判“无变化”；`source_*` 的文件名与 `?v=` 用完整
+`_debver` + `pkgrel`，revision 变化或同版本重打包都不会复用旧 deb；`.SRCINFO` 先写临时文件，校验失败时
+PKGBUILD 与 `.SRCINFO` 都不会被破坏。`pkgrel` 支持 Arch 的整数和小数形式（2、2.1）。
+如果工作区已经包含上游这个 deb（通常是更新后还没打 tag），脚本只提示打 tag，不会
+重复 bump `pkgrel`。
 
 想单独看某个版本号怎么拆：`./update.sh --parse '1:0.1.13-2ubuntu1'`。
 
@@ -164,11 +176,11 @@ makepkg --printsrcinfo > .SRCINFO
 makepkg -fc
 
 # 6. 检查产物：安装脚本有没有被带进去、文件列表有无异常
-bsdtar -tf npclient-bin-<新版本>-<pkgrel>-x86_64.pkg.tar.zst | grep -E '^\.(INSTALL|PKGINFO)$'
-bsdtar -xOf npclient-bin-<新版本>-<pkgrel>-x86_64.pkg.tar.zst .INSTALL | diff - npclient-bin.install
+bsdtar -tf npclient-<新版本>-<pkgrel>-x86_64.pkg.tar.zst | grep -E '^\.(INSTALL|PKGINFO)$'
+bsdtar -xOf npclient-<新版本>-<pkgrel>-x86_64.pkg.tar.zst .INSTALL | diff - npclient.install
 
 # 7. 升级、重启守护进程、验证
-sudo pacman -U npclient-bin-<新版本>-<pkgrel>-x86_64.pkg.tar.zst
+sudo pacman -U npclient-<新版本>-<pkgrel>-x86_64.pkg.tar.zst
 sudo systemctl restart npd.service     # post_upgrade 会提示
 sudo npctl doctor                      # running=true、mixedPort 非 0
 ```
@@ -176,8 +188,8 @@ sudo npctl doctor                      # running=true、mixedPort 非 0
 升级时还要顺手核对这几项，否则容易“版本号对了但包坏了”：
 
 - **安装脚本**：上游 `postinst` 若新增动作（建目录、迁移配置、加 polkit 规则），
-  `package()` 与 `npclient-bin.install` 要跟着改；只改版本号会漏掉。
-- **文件布局**：`bsdtar -tf 新包` 对比 `sudo pacman -Ql npclient-bin`，确认没有
+  `package()` 与 `npclient.install` 要跟着改；只改版本号会漏掉。
+- **文件布局**：`bsdtar -tf 新包` 对比 `sudo pacman -Ql npclient`，确认没有
   `/lib/systemd/...`、`/usr/share/doc/...` 这类 Debian 残留重新混进来。
 - **依赖**：`depends` 是从 ELF 的 `NEEDED` 反推的，不是抄 deb 的 `Depends:`。
   新版若链了新库，`readelf -d /usr/bin/npd` 一看就要补。
@@ -191,7 +203,7 @@ sudo npctl doctor                      # running=true、mixedPort 非 0
 
 ```bash
 sudo systemctl disable --now npd.service
-sudo pacman -Rnpclient-bin
+sudo pacman -Rn npclient
 # 彻底清除（本包有意保留这些）：
 sudo rm -rf /var/lib/npd /etc/npclient
 sudo userdel npd && sudo groupdel npclient
