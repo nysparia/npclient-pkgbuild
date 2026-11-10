@@ -1,4 +1,4 @@
-# Maintainer: Your Name <you at example dot com>
+# Maintainer: nysparia <nysparia@pm.me>
 
 pkgname=npclient
 _pkgname=npd
