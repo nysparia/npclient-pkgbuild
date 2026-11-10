@@ -128,23 +128,58 @@ deb 的 `control` 里 `Homepage: https://netpad.pro`、`Maintainer: NPclient <su
 sudo pacman -U npclient-<新版本>-<pkgrel>-x86_64.pkg.tar.zst
 ```
 
-两个安全约束：
+#### 重跑语义（幂等）
+
+`update.sh` 可以反复跑，**不会把版本号越推越高**。判定顺序固定为：先取基准，
+再比对，命中短路就只打印状态、不写文件。
+
+**基准**：HEAD 可达、版本最高的 `v*` tag 里的 PKGBUILD（即"用户真正装过的那版"），
+不是可能被手工改过的工作区。没有 tag 时才退回工作区并告警。
+
+| 场景 | 判定依据 | 行为 | 退出码 |
+|---|---|---|---|
+| 上游无变化 | deb 的完整 Version + 两个架构 sha256 **都等于基准** | 打印"上游无变化"；工作区领先 tag 时提示打 tag | 0 |
+| 工作区已含该 deb | `_debver` + `pkgver` + 两个 sha256 **都等于工作区** | 打印"工作区已包含该 deb"，只提示打 tag，**不 bump pkgrel** | 0 |
+| 上游真发版 | 以上都不命中 | 计算新版本并写入 PKGBUILD / .SRCINFO | 0 |
+| 需要 epoch 自增 | 候选版本未超过基准（典型是上游回退） | 打印计划后**拒绝写入**，需 `--accept-epoch` | 1 |
+| 工作区版本过高 | 工作区 `pkgver` 高于基准且无法超越 | 报错，提示先打 tag 或回退工作区 | 1 |
+
+第二行是防"版本虚高"的关键：上次跑完改了 PKGBUILD 但还没打 tag 时，基准仍是旧 tag，
+第一行不命中；若无此判定，脚本会误判为"上游发版"并再次 bump `pkgrel`，每跑一次涨一级。
+
+**网络行为**：每次运行（**包括 `--check`**）都会重新下载两个架构的 deb（约 24 MB）
+才能比对 sha256——上游没有版本化 URL，只能靠内容比对判断是否发版。下载带时间戳
+查询参数，避免 CDN 缓存导致误判"无变化"。
+
+**写入原子性**：`.SRCINFO` 先写临时文件，`makepkg --printsrcinfo` 校验失败时
+PKGBUILD 从备份回滚、`.SRCINFO` 保持原样，两者都不会被破坏。
+
+#### 退出码约定
+
+| 码 | 含义 |
+|---|---|
+| 0 | 成功：已更新，或判定无需更新（含 `--check` 预览） |
+| 1 | 拒绝执行：缺依赖、deb 校验失败、epoch 闸门未放行、版本无法前进 |
+
+#### 安全约束
 
 - **`--accept-epoch` 闸门**：需要本地 epoch 自增、或要采纳工作区里更高的 epoch 时，
   默认只打印计划并退出，不写文件；确认无误后加 `--accept-epoch` 重跑。
-- **以 git tag 为版本基准，但不允许低于工作区**：比较的是 HEAD 可达、版本最高的
-  `v*` tag 里的 PKGBUILD（用户真正装过的那版），而不是可能被手工改过的工作区；没有
-  tag 时才退回工作区并告警。如果工作区版本已经领先 tag（改了但还没打 tag），候选版本必须超过
+- **不允许低于工作区**：工作区版本已领先 tag（改了但还没打 tag）时，候选版本必须超过
   工作区：同 `pkgver` 时自动提升 `pkgrel`，工作区 `pkgver` 更高时直接拒绝写入。
 
-所以每次发布、验证通过后要打 tag（tag 名不能带 `:`，epoch 从 tag 内的
-PKGBUILD 读取）：
+#### 发版后必须打 tag
+
+不打 tag，下一次 `update.sh` 会继续以旧 tag 为基准。tag 名不能带 `:`（epoch 从 tag
+内的 PKGBUILD 读取）：
 
 ```bash
 git add -A
 git commit -m "npclient <pkgver>-<pkgrel>"
 git tag "v<pkgver>-<pkgrel>"
 ```
+
+#### Debian 版本号映射
 
 它负责处理 Debian 的 `[epoch:]upstream_version[-debian_revision]`：
 
@@ -159,13 +194,10 @@ git tag "v<pkgver>-<pkgrel>"
 里，变化时打印提示。新版本若没有超过当前 `epoch:pkgver-pkgrel`（典型是上游回退），
 脚本把本地 epoch +1、`pkgrel` 归 1。这是不可逆操作，建议先 `./update.sh --check` 确认。
 
-其他保证：两个架构的 deb 都下载并核对 `Package`/`Architecture`/`Version` 一致；
-两个 `sha256sums_*` 直接用本地下载的 deb 计算（不依赖 `updpkgsums`）；下载带时间戳
-查询参数，避免 CDN 缓存导致误判“无变化”；`source_*` 的文件名与 `?v=` 用完整
-`_debver` + `pkgrel`，revision 变化或同版本重打包都不会复用旧 deb；`.SRCINFO` 先写临时文件，校验失败时
-PKGBUILD 与 `.SRCINFO` 都不会被破坏。`pkgrel` 支持 Arch 的整数和小数形式（2、2.1）。
-如果工作区已经包含上游这个 deb（通常是更新后还没打 tag），脚本只提示打 tag，不会
-重复 bump `pkgrel`。
+其余保证：两个架构的 deb 都核对 `Package`/`Architecture`/`Version` 一致；
+`sha256sums_*` 直接用本地下载的 deb 计算（不依赖 `updpkgsums`）；`source_*` 的文件名与
+`?v=` 用完整 `_debver` + `pkgrel`，revision 变化或同版本重打包都不会复用旧 deb；
+`pkgrel` 支持 Arch 的整数和小数形式（2、2.1）。
 
 想单独看某个版本号怎么拆：`./update.sh --parse '1:0.1.13-2ubuntu1'`。
 
