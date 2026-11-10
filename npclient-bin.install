@@ -1,0 +1,76 @@
+pre_remove() {
+  # Upstream prerm runs `npd restore-leftover` so a half-open TUN / nft rules /
+  # policy routes are torn down before the binaries disappear. systemd already
+  # does this via ExecStopPost when the unit is stopped, but do it explicitly
+  # in case the daemon was never started through systemd.
+  if [[ -x /usr/bin/npd ]]; then
+    /usr/bin/npd restore-leftover || printf '%s\n' \
+      'npclient: restore-leftover failed; leftover TUN/rules may need manual cleanup.' >&2
+  fi
+}
+
+post_install() {
+  printf '%s\n' \
+    'NPclient 已安装。守护进程和隧道都不会自动启动，首次使用请按顺序执行：' \
+    '' \
+    '1) 把桌面用户加入 npclient 组（用于访问 npd 的 socket），然后重新登录：' \
+    '     sudo usermod -aG npclient <用户名>' \
+    '' \
+    '2) 启动守护进程并设为开机自启：' \
+    '     sudo systemctl enable --now npd.service' \
+    '' \
+    '3) 登录（浏览器完成设备授权，凭据由 npd 长期保存）：' \
+    '     npctl login' \
+    '' \
+    '4) 以 root 身份持久化启动隧道：' \
+    '     sudo npctl start --persist' \
+    '' \
+    '5) 让隧道在每次开机后自动恢复：' \
+    '     sudo npctl boot on' \
+    '' \
+    '验证：sudo npctl doctor    # 应看到 running=true、mixedPort 非 0' \
+    '' \
+    '注意：非 root 的 `npctl start` 会报 error=NoActiveSession。这不是没登录：' \
+    '登录只产生长期凭据，隧道所需的 owner 会话由客户端进程持有，`npctl login`' \
+    '退出即消失；纯 CLI 环境没有常驻客户端（桌面 GUI 才扮演这个角色）。' \
+    '`--persist` 把隧道所有权转交给系统（root），才是无 GUI 场景的正解。' \
+    '' \
+    '隧道 owner 是 root，因此查询状态需要 sudo：' \
+    '     sudo npctl status | sudo npctl tun | sudo npctl connections' \
+    '或使用 Web 控制台（独立会话，不需要 sudo）：' \
+    '     npctl web open            # http://127.0.0.1:9090' \
+    '     sudo npctl web secret     # 面板访问令牌' \
+    '' \
+    '代理入口（端口见 `sudo npctl status` 的 mixedPort，通常为 7891）：' \
+    '     export https_proxy=http://127.0.0.1:7891' \
+    '     export http_proxy=http://127.0.0.1:7891' \
+    '' \
+    'DNS 接管依赖 systemd-resolved（可选）：' \
+    '     sudo systemctl enable --now systemd-resolved.service' \
+    '' \
+    '配置文件 /etc/npclient/npd.toml 标记为 backup，升级时保留你的修改。'
+}
+
+post_upgrade() {
+  printf '%s\n' \
+    'npclient 已升级。二进制已被替换，请重启守护进程：' \
+    '  sudo systemctl restart npd.service' \
+    '' \
+    '若隧道没有自动恢复（此前未执行 `sudo npctl boot on`）：' \
+    '  sudo npctl start --persist' \
+    '' \
+    '上游 systemd 单元或配置模板可能已变更，请检查：' \
+    '  pacman -Qii npclient-bin | grep -A5 backup' \
+    '若提示 npd.toml.pacnew，请合并后再重启服务。'
+}
+
+post_remove() {
+  printf '%s\n' \
+    'NPclient 已卸载。以下内容被保留：' \
+    '  /etc/npclient/npd.toml      （配置，pacman 会留 .pacsave）' \
+    '  /var/lib/npd                （状态与已下载的 geoip 资源）' \
+    '  npd 用户与 npclient 组      （systemd-sysusers 不回收账户）' \
+    '如确需彻底清除：' \
+    '  sudo rm -rf /var/lib/npd /etc/npclient' \
+    '  sudo userdel npd && sudo groupdel npclient'
+}

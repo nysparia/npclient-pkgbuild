@@ -1,0 +1,29 @@
+pkgbase = npclient-bin
+	pkgdesc = NPclient TUN proxy daemon and command line client (prebuilt binaries)
+	pkgver = 0.1.12
+	pkgrel = 2
+	url = https://netpad.pro
+	install = npclient-bin.install
+	arch = x86_64
+	arch = aarch64
+	license = custom:LicenseRef-NPclient-Proprietary
+	depends = glibc
+	depends = gcc-libs
+	depends = systemd
+	depends = iproute2
+	depends = iana-etc
+	depends = polkit
+	optdepends = systemd-resolvconf: DNS takeover via resolvectl
+	optdepends = networkmanager: keep NetworkManager from managing np-tun0
+	provides = npclient=0.1.12
+	provides = npd=0.1.12
+	conflicts = npclient
+	conflicts = npd
+	options = !strip
+	backup = etc/npclient/npd.toml
+	source_x86_64 = npclient-bin-0.1.12-x86_64.deb::https://assets.netpad.pro/download/Linux/npd_latest_amd64.deb?v=0.1.12
+	sha256sums_x86_64 = 1ac7863421cb88e6de486629ea2b0527333f7966b9f0fba4146bbf7e80a4746e
+	source_aarch64 = npclient-bin-0.1.12-aarch64.deb::https://assets.netpad.pro/download/Linux/npd_latest_arm64.deb?v=0.1.12
+	sha256sums_aarch64 = 2e78c21ec7f3aa3d4b6f6252d32d21141ac734aca04def4ad2e4ccd18fdea2e8
+
+pkgname = npclient-bin
