@@ -40,12 +40,37 @@ sha256sums_aarch64=('2e78c21ec7f3aa3d4b6f6252d32d21141ac734aca04def4ad2e4ccd18fd
 package() {
   # The .deb is an ar archive; makepkg already extracted it into $srcdir,
   # leaving data.tar.* (zstd) side by side.
-  bsdtar -xf data.tar.* -C "${pkgdir}/" --no-same-owner
+  #
+  # 用 nullglob + 计数而不是裸 `data.tar.*`：裸 glob 未命中时会把字面量
+  # "data.tar.*" 原样传给 bsdtar，报错信息是 "not found" 而不是
+  # “上游 deb 结构变了”，排查时容易走偏。
+  shopt -s nullglob
+  local payloads=("$srcdir"/data.tar.*)
+  shopt -u nullglob
+  if (( ${#payloads[@]} == 0 )); then
+    error 'npclient: $srcdir 里没有 data.tar.*，上游 deb 结构可能变了'
+    return 1
+  fi
+  # 一个 deb 只应有一个 data.tar.*；多出来说明解包残留，取第一个并提示，
+  # 而不是像原来那样把第二个当成成员名传给 bsdtar。
+  if (( ${#payloads[@]} > 1 )); then
+    warning "npclient: \$srcdir 里有多个 data.tar.*，只用 ${payloads[0]##*/}"
+  fi
+  bsdtar -xf "${payloads[0]}" -C "${pkgdir}/" --no-same-owner
 
   # Debian layout -> Arch layout
   if [[ -d "${pkgdir}/lib/systemd/system" ]]; then
     install -d "${pkgdir}/usr/lib/systemd/system"
-    mv "${pkgdir}/lib/systemd/system/"* "${pkgdir}/usr/lib/systemd/system/"
+    # 裸 glob 在目录为空时会把字面量 "*" 传给 mv，报 "cannot stat"，
+    # 在 makepkg 的 errexit 下直接中止构建。空目录应当跳过而不是失败。
+    shopt -s nullglob
+    local units=("${pkgdir}/lib/systemd/system/"*)
+    shopt -u nullglob
+    if (( ${#units[@]} )); then
+      mv "${units[@]}" "${pkgdir}/usr/lib/systemd/system/"
+    else
+      warning 'npclient: /lib/systemd/system 存在但为空，未搬迁任何单元'
+    fi
     # 只删掉 /lib/systemd；若 /lib 下还有别的内容，保留并让文件列表暴露出来，
     # 而不是一把 rm -rf /lib 把上游文件悄悄删掉。
     rm -rf "${pkgdir}/lib/systemd"
@@ -77,13 +102,32 @@ EOF
 
   # SBOM / third-party licence texts: docs, not read at runtime
   # (verified: neither npd nor npctl references /usr/share/doc).
+  #
+  # 用 nullglob 而不是裸 glob：上游若某版不再附带 SBOM，`mv *.json` 会因
+  # 通配符未展开而报 "cannot stat"，在 makepkg 的 errexit 下直接中止构建。
+  # 那种情况应当安静跳过，而不是让打包失败。
+  #
+  # 必须在 package() 内部显式 shopt：makepkg 不会替我们开 nullglob，
+  # 未开时 "$dir/"*.json 会原样保留为字面量，${#sbom[@]} 恒为 1。
   install -d "${pkgdir}/usr/share/licenses/${pkgname}"
   if [[ -d "${pkgdir}/usr/share/doc/npd" ]]; then
-    mv "${pkgdir}/usr/share/doc/npd/"*.json "${pkgdir}/usr/share/licenses/${pkgname}/"
+    shopt -s nullglob
+    local sbom=("${pkgdir}/usr/share/doc/npd/"*.json)
+    shopt -u nullglob
+    if (( ${#sbom[@]} )); then
+      mv "${sbom[@]}" "${pkgdir}/usr/share/licenses/${pkgname}/"
+    else
+      warning 'npclient: 上游 deb 未附带 SBOM JSON，跳过许可证文件安装'
+    fi
     rm -rf "${pkgdir}/usr/share/doc"
   fi
-  mv "${pkgdir}/usr/share/npclient/GEOIP-NOTICE.txt" \
-    "${pkgdir}/usr/share/licenses/${pkgname}/GEOIP-NOTICE.txt"
+  # 字面路径同样要守卫：上游删掉 GEOIP-NOTICE.txt 时 mv 会失败并中止构建。
+  if [[ -f "${pkgdir}/usr/share/npclient/GEOIP-NOTICE.txt" ]]; then
+    mv "${pkgdir}/usr/share/npclient/GEOIP-NOTICE.txt" \
+      "${pkgdir}/usr/share/licenses/${pkgname}/GEOIP-NOTICE.txt"
+  else
+    warning 'npclient: 上游 deb 未附带 GEOIP-NOTICE.txt，跳过'
+  fi
 
   # Nothing else upstream-specific, but stay defensive about Debian remnants.
   rm -rf "${pkgdir}/usr/share/lintian"
