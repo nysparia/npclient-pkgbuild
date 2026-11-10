@@ -7,10 +7,13 @@
 #   revision  -> 不写进 pkgver；上游版本没变、只有修订号变了时 pkgrel+1
 #
 # 用法:
-#   ./update.sh            检查并更新 PKGBUILD 与 .SRCINFO
-#   ./update.sh --check    只显示计划，不写文件
-#   ./update.sh --build    更新后执行 makepkg -fc
-#   ./update.sh --parse V  只拆分一个 Debian 版本号（调试用）
+#   ./update.sh                 检查并更新 PKGBUILD 与 .SRCINFO
+#   ./update.sh --check         只显示计划，不写文件
+#   ./update.sh --build         更新后执行 makepkg -fc
+#   ./update.sh --accept-epoch  确认并允许本地 epoch 自增（不可逆）
+#   ./update.sh --parse V       只拆分一个 Debian 版本号（调试用）
+#
+# 版本基准优先取最近一个 v* git tag（即已发布的 PKGBUILD），没有 tag 时才用工作区。
 
 set -euo pipefail
 
@@ -30,10 +33,11 @@ trap 'if [[ -n $WORKDIR ]]; then rm -rf "$WORKDIR"; fi' EXIT
 usage() {
     cat <<'EOF'
 用法:
-  ./update.sh            检查并更新 PKGBUILD 与 .SRCINFO
-  ./update.sh --check    只显示计划，不写文件
-  ./update.sh --build    更新后执行 makepkg -fc
-  ./update.sh --parse V  只拆分一个 Debian 版本号（调试用）
+  ./update.sh                 检查并更新 PKGBUILD 与 .SRCINFO
+  ./update.sh --check         只显示计划，不写文件
+  ./update.sh --build         更新后执行 makepkg -fc
+  ./update.sh --accept-epoch  确认并允许本地 epoch 自增（不可逆）
+  ./update.sh --parse V       只拆分一个 Debian 版本号（调试用）
 EOF
 }
 
@@ -124,11 +128,12 @@ write_pkgbuild() {
 }
 
 main() {
-    local mode=update do_build=0
+    local mode=update do_build=0 accept_epoch=0
     while (($#)); do
         case $1 in
             --check) mode=check ;;
             --build) do_build=1 ;;
+            --accept-epoch) accept_epoch=1 ;;
             --parse)
                 (($# >= 2)) || die "--parse 需要一个版本号参数"
                 split_version "$2"
@@ -145,31 +150,80 @@ main() {
     cd "$HERE"
 
     local cmd
-    for cmd in curl bsdtar makepkg sha256sum awk sed vercmp; do
+    for cmd in curl bsdtar makepkg sha256sum awk sed vercmp tar; do
         command -v "$cmd" >/dev/null 2>&1 || die "缺少命令: $cmd"
     done
     [[ -f PKGBUILD ]] || die "当前目录没有 PKGBUILD"
 
-    local srcinfo
-    srcinfo=$(makepkg --printsrcinfo) || die "makepkg --printsrcinfo 失败，请先修好 PKGBUILD"
-
-    local cur_pkgver cur_rel cur_epoch cur_debver cur_sha_x cur_sha_a
-    cur_pkgver=$(srcinfo_field pkgver "$srcinfo")
-    cur_rel=$(srcinfo_field pkgrel "$srcinfo")
-    cur_epoch=$(srcinfo_field epoch "$srcinfo")
-    cur_sha_x=$(srcinfo_field sha256sums_x86_64 "$srcinfo")
-    cur_sha_a=$(srcinfo_field sha256sums_aarch64 "$srcinfo")
-    cur_debver=$(sed -n 's/^_debver=//p' PKGBUILD | head -n1 | tr -d "\"'")
-
-    if [[ -z $cur_debver ]]; then
-        die "PKGBUILD 缺少 _debver=<当前 deb 的 Version>；请先补一行，例如 _debver=0.1.12"
+    local work_srcinfo work_pkgver work_rel work_epoch work_debver
+    work_srcinfo=$(makepkg --printsrcinfo) || die "makepkg --printsrcinfo 失败，请先修好 PKGBUILD"
+    work_pkgver=$(srcinfo_field pkgver "$work_srcinfo")
+    work_rel=$(srcinfo_field pkgrel "$work_srcinfo")
+    work_epoch=$(srcinfo_field epoch "$work_srcinfo")
+    work_debver=$(sed -n 's/^_debver=//p' PKGBUILD | head -n1 | tr -d "\"'")
+    [[ -n $work_pkgver ]] || die "PKGBUILD 里没有 pkgver"
+    [[ $work_rel =~ ^[0-9]+$ ]] || die "工作区 pkgrel '$work_rel' 不是整数"
+    if [[ -n $work_epoch && ! $work_epoch =~ ^[0-9]+$ ]]; then
+        die "工作区 epoch '$work_epoch' 不是非负整数"
     fi
-    if [[ ! $cur_rel =~ ^[0-9]+$ ]]; then
-        die "现有 pkgrel '$cur_rel' 不是整数，本脚本不处理"
-    fi
-    [[ -n $cur_pkgver ]] || die "PKGBUILD 里没有 pkgver"
+    [[ $work_epoch == 0 ]] && work_epoch=''
 
     WORKDIR=$(mktemp -d)
+
+    # ---- 版本基准：最近一个 v* tag（已发布状态）；没有 tag 才退回工作区 ----
+    local git_repo=0 baseline_tag='' prefix='' repo_root='' base_srcinfo='' base_pkgbuild=''
+    if command -v git >/dev/null 2>&1 && git -C "$HERE" rev-parse --git-dir >/dev/null 2>&1; then
+        git_repo=1
+        repo_root=$(git -C "$HERE" rev-parse --show-toplevel)
+        baseline_tag=$(git -C "$HERE" describe --tags --abbrev=0 --match 'v*' 2>/dev/null || true)
+    fi
+
+    local base_dir="$WORKDIR/base"
+    if [[ -n $baseline_tag ]]; then
+        mkdir -p "$base_dir"
+        if ! git -C "$repo_root" archive "$baseline_tag" | tar -xf - -C "$base_dir"; then
+            die "无法从 tag $baseline_tag 导出基准树"
+        fi
+        prefix=$(git -C "$HERE" rev-parse --show-prefix)
+        base_pkgbuild="$base_dir/${prefix}PKGBUILD"
+        if [[ -f $base_pkgbuild ]]; then
+            base_srcinfo=$( cd "$base_dir/${prefix}" && makepkg --printsrcinfo 2>/dev/null ) \
+                || die "tag $baseline_tag 的 PKGBUILD 无法解析"
+        else
+            warn "tag $baseline_tag 里没有 PKGBUILD，改用工作区基准"
+            baseline_tag=''
+        fi
+    fi
+
+    if [[ -z $baseline_tag ]]; then
+        warn "没有可用的 v* tag；以工作区 PKGBUILD 为基准（发版后请 git tag v<pkgver>-<pkgrel>）"
+        base_srcinfo=$work_srcinfo
+        base_pkgbuild="$HERE/PKGBUILD"
+    fi
+
+    local cur_pkgver cur_rel cur_epoch cur_debver cur_sha_x cur_sha_a
+    cur_pkgver=$(srcinfo_field pkgver "$base_srcinfo")
+    cur_rel=$(srcinfo_field pkgrel "$base_srcinfo")
+    cur_epoch=$(srcinfo_field epoch "$base_srcinfo")
+    cur_sha_x=$(srcinfo_field sha256sums_x86_64 "$base_srcinfo")
+    cur_sha_a=$(srcinfo_field sha256sums_aarch64 "$base_srcinfo")
+    cur_debver=$(sed -n 's/^_debver=//p' "$base_pkgbuild" | head -n1 | tr -d "\"'")
+
+    [[ -n $cur_pkgver ]] || die "基准 PKGBUILD 里没有 pkgver"
+    [[ -n $cur_debver ]] || die "基准 PKGBUILD 缺少 _debver=<当前 deb 的 Version>"
+    [[ $cur_rel =~ ^[0-9]+$ ]] || die "基准 pkgrel '$cur_rel' 不是整数"
+    if [[ -n $cur_epoch && ! $cur_epoch =~ ^[0-9]+$ ]]; then
+        die "基准 epoch '$cur_epoch' 不是非负整数"
+    fi
+    [[ $cur_epoch == 0 ]] && cur_epoch=''
+
+    local base_str="${cur_epoch:+$cur_epoch:}${cur_pkgver}-${cur_rel}"
+    local work_str="${work_epoch:+$work_epoch:}${work_pkgver}-${work_rel}"
+    say "发布基准: ${baseline_tag:-工作区 PKGBUILD} = $base_str"
+    if [[ -n $baseline_tag && $work_str != "$base_str" ]]; then
+        warn "工作区版本 $work_str 与基准不同；本次以 tag 为准"
+    fi
+
     say "下载 x86_64 deb ..."
     curl -fSL --retry 3 --retry-delay 2 "$DEB_X86_64_URL" -o "$WORKDIR/x86_64.deb" \
         || die "下载失败: $DEB_X86_64_URL"
@@ -199,14 +253,7 @@ main() {
     pkgver=$(sanitize_pkgver "$upstream")
     debver=$ver_x
 
-    if [[ -n $cur_epoch && ! $cur_epoch =~ ^[0-9]+$ ]]; then
-        die "PKGBUILD 的 epoch '$cur_epoch' 不是非负整数"
-    fi
-    [[ $cur_epoch == 0 ]] && cur_epoch=''
-
-    # epoch 由我们在本地维护，是“版本排序修复计数器”，不照抄上游 deb 的值。
-    # 上游 epoch 只作为记录（含在 _debver 里），变化时提示一下。
-    local epoch=$cur_epoch
+    # epoch 由我们在本地维护，不照抄上游 deb 的值；上游值只记录在 _debver 里。
     local prev_vendor_epoch=''
     split_version "$cur_debver"
     prev_vendor_epoch=$V_EPOCH
@@ -224,48 +271,80 @@ main() {
     sha_a=$(sha256sum "$WORKDIR/aarch64.deb" | cut -d' ' -f1)
 
     if [[ $debver == "$cur_debver" && $sha_x == "$cur_sha_x" && $sha_a == "$cur_sha_a" ]]; then
-        say "已是最新: deb $debver，包 $cur_pkgver-$cur_rel"
+        say "上游无变化: deb $debver，基准包 $base_str"
+        local cmpw
+        cmpw=$(vercmp "$work_str" "$base_str" || true)
+        if ((cmpw > 0)); then
+            say "工作区已是 $work_str，尚未打 tag；发布后请: git tag v${work_pkgver}-${work_rel}"
+        elif ((cmpw < 0)); then
+            warn "工作区版本 $work_str 低于基准；是否有 epoch/pkgver 被误改？"
+        fi
         return 0
+    fi
+
+    # 以已发布基准为参照；工作区若被手工改高，只取它的 pkgrel/epoch 作为下限，
+    # 避免复用可能已经构建过的版本号。
+    local max_rel=$cur_rel
+    if ((work_rel > max_rel)); then
+        max_rel=$work_rel
+    fi
+    local epoch=$cur_epoch
+    if [[ -n $work_epoch ]]; then
+        if [[ -z $epoch ]] || ((10#$work_epoch > 10#$epoch)); then
+            epoch=$work_epoch
+        fi
     fi
 
     local new_rel reason
     if [[ $debver == "$cur_debver" ]]; then
-        new_rel=$((cur_rel + 1))
+        new_rel=$((max_rel + 1))
         reason='同版本内容变化（上游重打包），pkgrel+1'
     elif [[ $pkgver != "$cur_pkgver" ]]; then
         new_rel=1
         reason='上游版本变化，pkgrel 归 1'
     else
-        new_rel=$((cur_rel + 1))
+        new_rel=$((max_rel + 1))
         reason='仅 Debian 修订号变化，pkgrel+1'
     fi
 
-    local cur_str new_str cmp
-    cur_str="${cur_epoch:+$cur_epoch:}${cur_pkgver}-${cur_rel}"
-    new_str="${epoch:+$epoch:}${pkgver}-${new_rel}"
-    cmp=$(vercmp "$new_str" "$cur_str" || true)
+    local new_str="${epoch:+$epoch:}${pkgver}-${new_rel}"
+    local cmp epoch_bumped=0 old_epoch=''
+    cmp=$(vercmp "$new_str" "$base_str" || true)
     if ((cmp <= 0)); then
-        # 上游版本回退（或打包起点低于已发布版本）：本地 epoch 自增。
+        # 上游版本回退（或基准高于候选）：本地 epoch 自增。
         # 这是让 pacman 接受“更旧的上游版本”的唯一手段。
-        local old_epoch=${epoch:-0}
+        epoch_bumped=1
+        old_epoch=${epoch:-0}
         epoch=$((old_epoch + 1))
         new_rel=1
         new_str="${epoch}:${pkgver}-${new_rel}"
-        reason="版本未前进（$cur_str），本地 epoch 自增 ${old_epoch} -> ${epoch}，pkgrel 归 1"
-        warn "本地 epoch 自增 ${old_epoch} -> ${epoch}，不可逆；建议先跑 ./update.sh --check 确认"
-        cmp=$(vercmp "$new_str" "$cur_str" || true)
+        reason="版本未前进（$base_str），本地 epoch 自增 ${old_epoch} -> ${epoch}，pkgrel 归 1"
+        cmp=$(vercmp "$new_str" "$base_str" || true)
         if ((cmp <= 0)); then
-            die "epoch 自增后仍无法超过 $cur_str，拒绝继续"
+            die "epoch 自增后仍无法超过 $base_str，拒绝继续"
         fi
     fi
 
-    say "计划: $cur_str -> $new_str"
+    say "计划: $base_str -> $new_str"
     say "原因: $reason"
     say "sha256 x86_64: $sha_x"
     say "sha256 aarch64: $sha_a"
+    if ((epoch_bumped)); then
+        say "注意: 本地 epoch ${old_epoch:-0} -> ${epoch} 是不可逆操作"
+    fi
 
     if [[ $mode == check ]]; then
+        if ((epoch_bumped)); then
+            say "（需要 --accept-epoch 才会写入）"
+        fi
         return 0
+    fi
+
+    # ---- epoch 闸门 ----
+    if ((epoch_bumped)) && (( ! accept_epoch )); then
+        warn "检测到需要本地 epoch 自增，但未提供 --accept-epoch；PKGBUILD 未改动"
+        warn "确认 deb $debver 确实要发布后，重跑: ./update.sh --accept-epoch"
+        return 1
     fi
 
     local backup="$WORKDIR/PKGBUILD.bak"
@@ -276,6 +355,9 @@ main() {
         die "新 PKGBUILD 校验失败，已回滚 PKGBUILD"
     fi
     say "已更新 PKGBUILD 与 .SRCINFO"
+    if ((git_repo)); then
+        say "发布后请打 tag: git add -A && git commit -m \"npclient-bin ${pkgver}-${new_rel}\" && git tag v${pkgver}-${new_rel}"
+    fi
 
     if ((do_build)); then
         say "开始构建 ..."

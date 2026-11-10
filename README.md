@@ -101,6 +101,22 @@ cd npclient-source
 sudo pacman -U npclient-bin-<新版本>-<pkgrel>-x86_64.pkg.tar.zst
 ```
 
+两个安全约束：
+
+- **`--accept-epoch` 闸门**：新版本没有超过已发布版本、需要本地 epoch 自增时，
+  默认只打印计划并退出，不写文件；确认无误后加 `--accept-epoch` 重跑。
+- **以 git tag 为版本基准**：比较的是最近一个 `v*` tag 里的 PKGBUILD（用户真正
+  装过的那版），而不是可能被手工改过的工作区；没有 tag 时才退回工作区并告警。
+
+所以每次发布、验证通过后要打 tag（tag 名不能带 `:`，epoch 从 tag 内的
+PKGBUILD 读取）：
+
+```bash
+git add -A
+git commit -m "npclient-bin <pkgver>-<pkgrel>"
+git tag "v<pkgver>-<pkgrel>"
+```
+
 它负责处理 Debian 的 `[epoch:]upstream_version[-debian_revision]`：
 
 | Debian 部分 | 落到哪里 |
@@ -136,7 +152,7 @@ bsdtar -xOf .npchk-amd64.deb control.tar.zst | bsdtar -xOf - ./control \
 
 # 3. 改 PKGBUILD：pkgver 只填 upstream 部分；
 #    上游版本变 → pkgrel=1；只有 Debian 修订号变 → pkgrel+1；
-#    有 epoch 时另写 epoch=N；_debver 填完整 Version（含 epoch/修订号）
+#    版本回退需要本地 epoch 自增时才写 epoch=N；_debver 填完整 Version
 
 # 4. 重算校验和。updpkgsums 会同时处理 source_x86_64 与 source_aarch64
 #    （它内部调用 makepkg --geninteg；命令来自 pacman-contrib，未装则先
@@ -169,6 +185,7 @@ sudo npctl doctor                      # running=true、mixedPort 非 0
   若没有它（`pacman-contrib` 未安装），就对两个 deb 各跑一次 `sha256sum`。
 
 发布到 AUR 时只提交 `PKGBUILD` 与 `.SRCINFO`；二进制包、`.deb` 都不要进仓库。
+本地仓库发版后记得提交并打 tag，否则下一次 `update.sh` 会继续以旧 tag 为基准。
 
 ## 卸载
 
