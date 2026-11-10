@@ -1,4 +1,20 @@
 #!/bin/sh
+# ============================================================================
+#  警告：这是 NetPad 上游的 Ubuntu 安装脚本，本仓库仅作参考存档，不要运行。
+#  WARNING: This is NetPad's UPSTREAM Ubuntu installer, archived here for
+#  reference only. DO NOT RUN IT.
+#
+#  它做的是 `dpkg -i`，只适用于 Debian/Ubuntu。在 Arch/Manjaro 上请用本目录的
+#  PKGBUILD（`makepkg -fci`），不要执行本文件。
+#
+#  上游原文（upstream source, 逐字节一致 / byte-identical）:
+#    curl -fsSL https://1net.netpad.pro/api/v2/public/linux-install | sudo sh
+#  sha256: c11f57f2572831f6c95c0a194fca32bfc6398c8788907492ac3a1a56be0c19e9
+#  抓取日期 / fetched: 2026-11-10，对应 npd 0.1.12
+#
+#  注意：`curl ... | sudo sh` 这种管道执行方式本身就有风险——你执行的是远端
+#  随时可变的脚本，且以 root 身份。要装的话请先下载、读一遍、核对 sha256。
+# ============================================================================
 set -eu
 
 die() { printf 'NPclient install: %s\n' "$*" >&2; exit 1; }

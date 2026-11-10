@@ -10,7 +10,7 @@ Manjaro/Arch 打包工作区，把 NetPad 的 NPclient 官方 Ubuntu `.deb` 转�
 | `npclient.install` | pacman 钩子脚本（安装/升级/卸载提示） |
 | `update.sh` | 从上游 deb 的 control 同步 `pkgver`/`pkgrel`/`epoch`/两个架构的 sha256 |
 | `.SRCINFO` | AUR 需要，`makepkg --printsrcinfo > .SRCINFO` 生成 |
-| `linux-install.sh` | 上游 Ubuntu 安装脚本，仅作参考，**不要运行** |
+| `linux-install.sh` | 上游 Ubuntu 安装脚本存档（与上游逐字节一致），**不要运行** |
 | `npclient-0.1.12-3-x86_64.pkg.tar.zst` | 已构建好的包 |
 
 ## 构建与安装
@@ -90,8 +90,29 @@ polkit.addRule(function(action, subject) {
    - `polkit`：polkit 规则文件生效所需
    - `iana-etc`：`getaddrinfo` 走服务名解析时需要 `/etc/services`
    - 未依赖 `iptables`/`nft` 可执行文件：只引用 netlink 常量，不 spawn 外部命令
-5. **AUR 提交前的仓库元数据**：`# Maintainer:` 仍是占位名；仓库也还没有 AUR 要求的
-   `LICENSE`/`REUSE.toml`（打包脚本本身可用 0BSD）。这两项不影响本地构建。
+5. **AUR 提交前的仓库元数据**：`# Maintainer:` 仍是占位名；仓库根目录已有 `LICENSE`
+   （专有 / All rights reserved，见该文件对第三方内容的例外说明），但还没有 AUR 要求的
+   `REUSE.toml`。这两项不影响本地构建。
+
+## 上游地址
+
+| 用途 | 地址 | 状态（2026-11-10 实测） |
+|---|---|---|
+| 官网 / 产品页 | <https://netpad.pro> | 200 |
+| 官方 Linux 安装命令 | `curl -fsSL https://1net.netpad.pro/api/v2/public/linux-install \| sudo sh` | 200，`text/x-shellscript` |
+| 安装脚本直链 | <https://1net.netpad.pro/api/v2/public/linux-install> | 200，3075 B，sha256 `c11f57f2…0c19e9` |
+| deb（x86_64） | <https://assets.netpad.pro/download/Linux/npd_latest_amd64.deb> | 200，12 638 650 B |
+| deb（aarch64） | <https://assets.netpad.pro/download/Linux/npd_latest_arm64.deb> | 200，12 103 498 B |
+| deb 备用源 | `https://download.netpad.xyz/d/np/root/download/Linux/npd_latest_*.deb` | **连接被重置**（脚本里的 fallback，当前不可用） |
+| GeoIP 资源 | `https://assets.netpad.pro/cool/tfeng/geoip/country.mmdb` | **404**（由 npd 运行时自行下载，非打包必需） |
+
+`linux-install.sh` 与本仓库存档的副本**逐字节一致**（sha256 相同），说明存档没有过期。
+deb 的 `control` 里 `Homepage: https://netpad.pro`、`Maintainer: NPclient <support@netpad.pro>`，
+与上表一致。
+
+> 上游没有公开的 Linux 文档页（`/docs`、`/docs/linux` 均 404），安装方式只有上面那条
+> `curl | sudo sh` 管道命令；`netpad.pro/download` 是 SPA 路由，返回的是首页外壳。
+> 因此本仓库的 `linux-install.sh` 存档 + 上表就是目前能拿到的最完整上游信息。
 
 ## 升级流程
 
