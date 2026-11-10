@@ -91,8 +91,8 @@ polkit.addRule(function(action, subject) {
    - `iana-etc`：`getaddrinfo` 走服务名解析时需要 `/etc/services`
    - 未依赖 `iptables`/`nft` 可执行文件：只引用 netlink 常量，不 spawn 外部命令
 5. **AUR 提交前的仓库元数据**：`# Maintainer:` 仍是占位名；仓库根目录已有 `LICENSE`
-   （专有 / All rights reserved，见该文件对第三方内容的例外说明），但还没有 AUR 要求的
-   `REUSE.toml`。这两项不影响本地构建。
+   （MIT，覆盖打包脚本本身；上游 NPclient 是专有软件，见该文件的例外条款），但还没有
+   AUR 要求的 `REUSE.toml`。这两项不影响本地构建。
 
 ## 上游地址
 
